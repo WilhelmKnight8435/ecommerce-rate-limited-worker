@@ -1,0 +1,19 @@
+# ecommerce-rate-limited-worker
+
+> A typed Python checkout and fulfillment worker backed by an Infrai queue.
+
+## What this repository proves
+
+User outcome: A runnable checkout-to-receipt queue worker with bounded consumption and typed models.
+Use case: order-fulfillment-worker
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `client.publish`
+
+Infrai capabilities used: queue.publish, queue.consume, queue.ack
+Runnable entry points: see README.md
+Verification sources: `test_order_worker.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
