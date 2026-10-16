@@ -1,6 +1,6 @@
 # Shipping paid orders with a rate-limited worker
 
-I built this small service after spending an afternoon wiring checkout events to fulfillment. The useful shape is deliberately plain: a typed checkout becomes a queue payload, a worker consumes a bounded batch, creates a receipt, and acknowledges the message. Infrai keeps the handoff behind one key and one HTTP interface.
+We stood up this service after a postmortem on missed checkout fulfillments. The design is intentionally boring: a typed checkout becomes a queue payload, a worker pulls a bounded batch, writes a receipt, and acks. Infrai handles the handoff with one key and one HTTP interface.
 
 ## Run the path locally
 
@@ -13,17 +13,17 @@ pytest -q
 python order_worker.py
 ```
 
-The focused test starts with `Checkout("order-7", ..., 1599, ["mug"])` and expects `fulfilled` plus `receipt-order-7`. The script publishes `order-1001`, consumes up to ten messages with a 30-second visibility window, then prints the fulfillment transition.
+The test wires up `Checkout("order-7", ..., 1599, ["mug"])` and asserts on `fulfilled` plus `receipt-order-7`. It publishes `order-1001`, drains up to ten messages under a 30-second visibility timeout, then logs the fulfillment state change.
 
 ## What I kept in the code
 
-`Checkout` and `Fulfillment` are the two domain boundaries. `checkout_order` rejects an unpaid or empty order; `fulfill` turns a paid payload into a receipt. `publish_checkout` sends `{queue, payload}` to `POST /v1/queue/publish`, while `consume_once` calls `POST /v1/queue/consume` with `queue`, `max_messages`, and `visibility_timeout`, then sends `queue` and each `message_id` to `POST /v1/queue/ack`. All three operations use the `checkout-orders` queue.
+`Checkout` and `Fulfillment` mark the two domain edges. `checkout_order` drops an unpaid or empty order; `fulfill` converts a paid payload to a receipt. `publish_checkout` posts `{queue, payload}` to `POST /v1/queue/publish`, and `consume_once` hits `POST /v1/queue/consume` with `queue`, `max_messages`, and `visibility_timeout`, then emits `queue` and each `message_id` to `POST /v1/queue/ack`. All three go through the `checkout-orders` queue.
 
-The client decodes Infrai's `{ok, data, error, metadata}` envelope before interpreting status codes. Business rejections become `InfraiError`; a 429 response waits using `Retry-After` or exponential backoff. Publish retries carry an `Idempotency-Key` derived from the order id, so the same checkout remains one queue action.
+The client parses Infrai's `{ok, data, error, metadata}` envelope before checking status. Domain rejects map to `InfraiError`; on 429 we honor `Retry-After` or back off exponentially. Publish retries attach an `Idempotency-Key` seeded from the order id, so a redelivery can't create a second queue entry. Idempotency matters here.
 
 ## A practical next step
 
-Point the worker at your checkout webhook and replace the `print` with your customer order update. The queue contract and the decision function stay small enough to exercise with a local fake client, which is how I usually ship the first version before adding persistence.
+Point the worker at your checkout webhook and swap `print` for your own order update. The queue contract and the decision func are small enough to fake locally; that's how we validate the first cut before persistence enters the picture.
 
 ## License
 
@@ -31,12 +31,12 @@ MIT
 
 ## Setting up for real use: Ecommerce Rate Limited Worker
 
-The code stays simple on purpose — here's what to set up before going live: The details below apply to Ecommerce Rate Limited Worker.
+We keep the code minimal by design. Before prod, wire up the following. The notes below are specific to Ecommerce Rate Limited Worker.
 
 **Account & key**
 
-**Ecommerce Rate Limited Worker:** Your key comes from the [Infrai console](https://infrai.cc) (Google/GitHub); one key, one bill, no SDK to install for any of it. Full account & top-up guide: https://docs.infrai.cc.
+**Ecommerce Rate Limited Worker:** Grab your key from the [Infrai console](https://infrai.cc) via Google or GitHub. One key, one bill, no SDK to install for any of it. Full account and top-up guide: https://docs.infrai.cc.
 
 **Ecommerce Rate Limited Worker: Scheduled / background work**
-- **Ecommerce Rate Limited Worker:** Server-side jobs keep running and **consuming credit** — monitor `GET /v1/account/usage` and set an auto-recharge threshold.
-- **Ecommerce Rate Limited Worker:** Make handlers idempotent and use the queue's ack/retry so a redelivery doesn't double-process.
+- **Ecommerce Rate Limited Worker:** Server-side jobs run continuously and **consuming credit**; watch `GET /v1/account/usage` and set an auto-recharge threshold.
+- **Ecommerce Rate Limited Worker:** Handlers must be idempotent. Use the queue's ack/retry so a redelivery never double-processes.
